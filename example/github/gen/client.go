@@ -10,7 +10,7 @@ import (
 )
 
 type Client struct {
-	Client *client.Client
+	Client *client.HTTPClient
 }
 
 func NewClient(cli *http.Client, baseURL string, options ...client.HTTPRequestOption) *Client {

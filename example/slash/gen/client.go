@@ -9,7 +9,7 @@ import (
 )
 
 type Client struct {
-	Client *client.Client
+	Client *client.HTTPClient
 }
 type UserFragment struct {
 	Name     *string "json:\"name\" graphql:\"name\""

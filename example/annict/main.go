@@ -71,6 +71,6 @@ func main() {
 	fmt.Println(res.Viewer.Works.Edges[0].Node.Title, res.Viewer.Works.Edges[0].Cursor, len(res.Viewer.Works.Edges))
 }
 
-func NewAnnictClient(c *client.Client) *gen.Client {
+func NewAnnictClient(c *client.HTTPClient) *gen.Client {
 	return &gen.Client{Client: c}
 }

@@ -61,12 +61,14 @@ type Operation struct {
 	Name                string
 	ResponseStructName  string
 	Operation           string
+	OperationType       string
 	Args                []*Argument
 	VariableDefinitions ast.VariableDefinitionList
 }
 
-func NewOperation(operation *ast.OperationDefinition, queryDocument *ast.QueryDocument, args []*Argument) *Operation {
+func NewOperation(operationType ast.Operation, operation *ast.OperationDefinition, queryDocument *ast.QueryDocument, args []*Argument) *Operation {
 	return &Operation{
+		OperationType:       string(operationType),
 		Name:                operation.Name,
 		ResponseStructName:  getResponseStructName(operation),
 		Operation:           queryString(queryDocument),
@@ -84,6 +86,7 @@ func (s *Source) Operations(queryDocuments []*ast.QueryDocument) []*Operation {
 		queryDocument := queryDocumentsMap[operation.Name]
 		args := operationArgsMap[operation.Name]
 		operations = append(operations, NewOperation(
+			operation.Operation,
 			operation,
 			queryDocument,
 			args,
@@ -168,6 +171,28 @@ func (s *Source) Query() (*Query, error) {
 
 	return &Query{
 		Name: s.schema.Query.Name,
+		Type: fields.StructType(),
+	}, nil
+}
+
+type Subscription struct {
+	Name string
+	Type types.Type
+}
+
+func (s *Source) Subscription() (*Subscription, error) {
+	fields, err := s.sourceGenerator.NewResponseFieldsByDefinition(s.schema.Subscription)
+	if err != nil {
+		return nil, xerrors.Errorf("generate failed for subscription struct type : %w", err)
+	}
+
+	s.sourceGenerator.cfg.Models.Add(
+		s.schema.Subscription.Name,
+		fmt.Sprintf("%s.%s", s.sourceGenerator.client.Pkg(), templates.ToGo(s.schema.Subscription.Name)),
+	)
+
+	return &Subscription{
+		Name: s.schema.Subscription.Name,
 		Type: fields.StructType(),
 	}, nil
 }

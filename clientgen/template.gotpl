@@ -14,17 +14,28 @@
 {{ reserveImport "github.com/Yamashou/gqlgenc/graphqljson" }}
 {{ reserveImport "github.com/Yamashou/gqlgenc/client" }}
 
-type Client struct {
-	Client *client.Client
+type GqlClient struct {
+	httpClient *client.HTTPClient
+	wsClient   *client.WSClient
 }
 
-func NewClient(cli *http.Client, baseURL string, options ...client.HTTPRequestOption) *Client {
-	return &Client{Client: client.NewClient(cli, baseURL, options...)}
+func NewHTTPClient(cli *http.Client, baseURL string, options ...client.HTTPRequestOption) *client.HTTPClient {
+	return client.NewClient(cli, baseURL, options...)
+}
+
+func NewWSClient(wsURL string, opts ...client.WSClientOptionsFunc) (*client.WSClient, error) {
+	return client.NewWsClient(wsURL, opts...)
+}
+
+func NewClient(httpClient *client.HTTPClient, wsClient *client.WSClient) *GqlClient {
+	return &GqlClient{httpClient: httpClient, wsClient: wsClient}
 }
 
 type {{ .Query.Name | go }} {{ .Query.Type | ref }}
 
 type {{ .Mutation.Name | go }} {{ .Mutation.Type | ref }}
+
+type {{ .Subscription.Name | go }} {{ .Subscription.Type | ref }}
 
 {{- range $name, $element := .Fragment }}
 	type  {{ .Name | go  }} {{ .Type | ref }}
@@ -34,10 +45,46 @@ type {{ .Mutation.Name | go }} {{ .Mutation.Type | ref }}
     type  {{ .Name | go  }} {{ .Type | ref }}
 {{- end }}
 
-{{- range $model := .Operation}}
-const {{ $model.Name|go }}Query = `{{ $model.Operation }}`
+{{- range $model := .Operation }}
+{{ $operationVariableName := ( print ($model.Name | go) ($model.OperationType | go) )}}
+const {{ $operationVariableName }} = `{{ $model.Operation }}`
 
-func (c *Client) {{ $model.Name|go }} (ctx context.Context{{- range $arg := .Args }}, {{ $arg.Variable | goPrivate }} {{ $arg.Type | ref }} {{- end }}, httpRequestOptions ...client.HTTPRequestOption) (*{{ $model.ResponseStructName | go }}, error) {
+{{ if eq $model.OperationType "subscription" }}
+
+func (c *GqlClient) {{ $model.Name|go }} (ctx context.Context{{- range $arg := .Args }}, {{ $arg.Variable | goPrivate }} {{ $arg.Type | ref }} {{- end }}, operationCtx map[string]interface{}) (chan *{{ $model.Name|go }} , chan error) {
+	vars := map[string]interface{}{
+	{{- range $args := .VariableDefinitions}}
+		"{{ $args.Variable }}": {{ $args.Variable | goPrivate }},
+	{{- end }}
+	}
+
+	resChan := make(chan *{{ $model.Name|go }} )
+	errChan := make(chan error)
+
+	dataChan, err := c.wsClient.Subscribe(ctx, {{ $operationVariableName }}, vars, operationCtx)
+	if err != nil {
+		errChan <- err
+	}
+
+	go func() {
+		for d := range dataChan {
+			data := &{{ $model.Name|go }} {}
+			if err := c.wsClient.ParseSubscriptionData(d, data); err != nil {
+				errChan <- err
+			} else {
+				resChan <- data
+			}
+		}
+
+		// data channel is closed
+		close(resChan)
+		close(errChan)
+	}()
+	return resChan, errChan
+}
+{{ else }}
+
+func (c *GqlClient) {{ $model.Name|go }} (ctx context.Context{{- range $arg := .Args }}, {{ $arg.Variable | goPrivate }} {{ $arg.Type | ref }} {{- end }}, httpRequestOptions ...client.HTTPRequestOption) (*{{ $model.ResponseStructName | go }}, error) {
 	vars := map[string]interface{}{
 	{{- range $args := .VariableDefinitions}}
 		"{{ $args.Variable }}": {{ $args.Variable | goPrivate }},
@@ -45,10 +92,11 @@ func (c *Client) {{ $model.Name|go }} (ctx context.Context{{- range $arg := .Arg
 	}
 
     var res {{ $model.ResponseStructName | go }}
-    if err := c.Client.Post(ctx, {{ $model.Name|go }}Query, &res, vars, httpRequestOptions...); err != nil {
+    if err := c.httpClient.Post(ctx, {{ $operationVariableName }}, &res, vars, httpRequestOptions...); err != nil {
         return nil, err
     }
 
     return &res, nil
 }
-{{- end}}
+{{- end }}
+{{- end }}

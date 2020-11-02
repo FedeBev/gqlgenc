@@ -16,8 +16,8 @@ import (
 // HTTPRequestOption represents the options applicable to the http client
 type HTTPRequestOption func(req *http.Request)
 
-// Client is the http client wrapper
-type Client struct {
+// HTTPClient is the http client wrapper
+type HTTPClient struct {
 	Client             *http.Client
 	BaseURL            string
 	HTTPRequestOptions []HTTPRequestOption
@@ -31,15 +31,15 @@ type Request struct {
 }
 
 // NewClient creates a new http client wrapper
-func NewClient(client *http.Client, baseURL string, options ...HTTPRequestOption) *Client {
-	return &Client{
+func NewClient(client *http.Client, baseURL string, options ...HTTPRequestOption) *HTTPClient {
+	return &HTTPClient{
 		Client:             client,
 		BaseURL:            baseURL,
 		HTTPRequestOptions: options,
 	}
 }
 
-func (c *Client) newRequest(ctx context.Context, query string, vars map[string]interface{}, httpRequestOptions []HTTPRequestOption) (*http.Request, error) {
+func (c *HTTPClient) newRequest(ctx context.Context, query string, vars map[string]interface{}, httpRequestOptions []HTTPRequestOption) (*http.Request, error) {
 	r := &Request{
 		Query:         query,
 		Variables:     vars,
@@ -107,7 +107,7 @@ func (er *ErrorResponse) Error() string {
 
 // Post sends a http POST request to the graphql endpoint with the given query then unpacks
 // the response into the given object.
-func (c *Client) Post(ctx context.Context, query string, respData interface{}, vars map[string]interface{}, httpRequestOptions ...HTTPRequestOption) error {
+func (c *HTTPClient) Post(ctx context.Context, query string, respData interface{}, vars map[string]interface{}, httpRequestOptions ...HTTPRequestOption) error {
 	req, err := c.newRequest(ctx, query, vars, httpRequestOptions)
 	if err != nil {
 		return xerrors.Errorf("don't create request: %w", err)
@@ -144,6 +144,24 @@ func parseResponse(body []byte, httpCode int, result interface{}) error {
 		if gqlErr, ok := err.(*GqlErrorList); ok {
 			errResponse.GqlErrors = &gqlErr.Errors
 		} else if !isKOCode { // if is KO code there is already the http error, this error should not be returned
+			return err
+		}
+	}
+
+	if errResponse.HasErrors() {
+		return errResponse
+	}
+
+	return nil
+}
+
+func parseSubscriptionResponse(body json.RawMessage, result interface{}) error {
+	errResponse := &ErrorResponse{}
+
+	if err := unmarshal(body, result); err != nil {
+		if gqlErr, ok := err.(*GqlErrorList); ok {
+			errResponse.GqlErrors = &gqlErr.Errors
+		} else {
 			return err
 		}
 	}
