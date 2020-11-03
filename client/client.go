@@ -155,24 +155,6 @@ func parseResponse(body []byte, httpCode int, result interface{}) error {
 	return nil
 }
 
-func parseSubscriptionResponse(body json.RawMessage, result interface{}) error {
-	errResponse := &ErrorResponse{}
-
-	if err := unmarshal(body, result); err != nil {
-		if gqlErr, ok := err.(*GqlErrorList); ok {
-			errResponse.GqlErrors = &gqlErr.Errors
-		} else {
-			return err
-		}
-	}
-
-	if errResponse.HasErrors() {
-		return errResponse
-	}
-
-	return nil
-}
-
 // response is a GraphQL layer response from a handler.
 type response struct {
 	Data   json.RawMessage `json:"data"`

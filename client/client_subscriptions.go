@@ -16,6 +16,7 @@ import (
 	"github.com/gorilla/websocket"
 )
 
+// WSClient is the websocket client instance
 type WSClient struct {
 	conn            *websocket.Conn
 	options         *WSClientOptions
@@ -24,6 +25,7 @@ type WSClient struct {
 	nextOperationID int
 }
 
+// WSClientOptions are all the options available for the ws creation
 type WSClientOptions struct {
 	url     *url.URL
 	headers http.Header
@@ -31,8 +33,10 @@ type WSClientOptions struct {
 	errChan chan error
 }
 
+// WSClientOptionsFunc are all the options available for the creation of the client
 type WSClientOptionsFunc func(*WSClientOptions)
 
+// WithCustomHeaders adds custom header ad the connection request
 func WithCustomHeaders(customHeaders http.Header) WSClientOptionsFunc {
 	return func(s *WSClientOptions) {
 		for k, h := range customHeaders {
@@ -41,12 +45,14 @@ func WithCustomHeaders(customHeaders http.Header) WSClientOptionsFunc {
 	}
 }
 
+// WithPayload adds a payload at the init message
 func WithPayload(payload map[string]interface{}) WSClientOptionsFunc {
 	return func(s *WSClientOptions) {
 		s.payload = payload
 	}
 }
 
+// WithErrorChannel sets an error channel where all the ws errors will be reported
 func WithErrorChannel(errChan chan error) WSClientOptionsFunc {
 	return func(s *WSClientOptions) {
 		s.errChan = errChan
@@ -75,6 +81,7 @@ type messageFormat struct {
 	Payload json.RawMessage `json:"payload,omitempty"`
 }
 
+// NewWsClient creates a new websocket client instance
 func NewWsClient(wsURL string, opts ...WSClientOptionsFunc) (*WSClient, error) {
 	u, err := url.Parse(wsURL)
 	if err != nil {
@@ -110,10 +117,12 @@ func NewWsClient(wsURL string, opts ...WSClientOptionsFunc) (*WSClient, error) {
 	return c, nil
 }
 
+// Close closes a websocket connection
 func (w *WSClient) Close() {
 	w.conn.Close()
 }
 
+// connect opens the connection with the target server
 func (w *WSClient) connect() error {
 	c, _, err := websocket.DefaultDialer.Dial(w.options.url.String(), w.options.headers)
 	if err != nil {
@@ -214,6 +223,8 @@ func (w *WSClient) pushError(err error) {
 	}
 }
 
+// processIncomingMsg will unmarshal the response except the payload field, that field will be unmarshalled by gqlparser
+// if the received message is of type data, the paylod will be sent to the right data channel, according with the id
 func (w *WSClient) processIncomingMsg(msg []byte) {
 	go func() {
 		log.Printf("Received msg %s\n", string(msg))
@@ -274,6 +285,7 @@ type operationPayload struct {
 	Context       map[string]interface{} `json:"context,omitempty"`
 }
 
+// Subscribe creates a new graphql subscription
 func (w *WSClient) Subscribe(ctx context.Context, operation string, variables map[string]interface{}, context map[string]interface{}) (chan json.RawMessage, error) {
 	operationID := fmt.Sprintf("%d", w.nextOperationID)
 	w.nextOperationID++
@@ -305,7 +317,6 @@ func (w *WSClient) Subscribe(ctx context.Context, operation string, variables ma
 	dataListenerChan := make(chan json.RawMessage)
 	w.dataChannels[operationID] = dataListenerChan
 
-	log.Printf("sending start %s\n", string(newMsgStr))
 	err = w.conn.WriteMessage(websocket.TextMessage, newMsgStr)
 	if err != nil {
 		w.pushError(xerrors.Errorf("%w", err))
@@ -316,6 +327,25 @@ func (w *WSClient) Subscribe(ctx context.Context, operation string, variables ma
 	return dataListenerChan, nil
 }
 
+// ParseSubscriptionData unmarshal the data into the target interface
 func (*WSClient) ParseSubscriptionData(d json.RawMessage, r interface{}) error {
 	return parseSubscriptionResponse(d, r)
+}
+
+func parseSubscriptionResponse(body json.RawMessage, result interface{}) error {
+	errResponse := &ErrorResponse{}
+
+	if err := unmarshal(body, result); err != nil {
+		if gqlErr, ok := err.(*GqlErrorList); ok {
+			errResponse.GqlErrors = &gqlErr.Errors
+		} else {
+			return err
+		}
+	}
+
+	if errResponse.HasErrors() {
+		return errResponse
+	}
+
+	return nil
 }
